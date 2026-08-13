@@ -5,7 +5,7 @@ homepage = "https://github.com/jieiku/abridge"
 min_version = "0.23.3"
 demo = "https://abridge.pages.dev/"
 
-# Abridge theme author info
+# Abridge theme author info:
 [author]
 name = "Jake G (jieiku)"
 homepage = "https://github.com/jieiku/"
