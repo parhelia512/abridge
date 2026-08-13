@@ -104,11 +104,36 @@ async function abridge() {
     var hash = Math.floor(new Date().getTime() / 1000);
     fs.renameSync(path.join(__dirname, "static/js/pagefind-entry.json"), path.join(__dirname, "static/js/pagefind-entry-" + hash + ".json"));
 
-    // original: var e=await(await fetch(this.basePath+"pagefind-entry.json?ts="+Date.now())).json();
-    //      new: var e=await(await fetch(this.basePath+"pagefind-entry-1723268715.json")).json();
-    // Tricky regex, so I split it into two replaceInFileSync() calls, pull requests welcome if you can improve this.
-    replaceInFileSync({ files: path.join(__dirname, "static/js/pagefind_search.js"), from: /pagefind-entry\.json\?ts=/g, to: "pagefind-entry-" + hash + "\.json" });
-    replaceInFileSync({ files: path.join(__dirname, "static/js/pagefind_search.js"), from: /Date.now\(\)/g, to: "\"\"" });
+    // Pagefind builds the entry URL in several forms across versions, e.g.:
+    //   this.basePath+"pagefind-entry.json?ts="+Date.now()
+    //   `${this.basePath}pagefind-entry.json?ts=${Date.now()}`
+    // Replace those with a build-time hashed filename (no cache-bust query).
+    // Also strip import.meta (ESM-only) so the classic <script defer> bundle parses.
+    const pagefindSearchPath = path.join(__dirname, "static/js/pagefind_search.js");
+    let pfSearch = fs.readFileSync(pagefindSearchPath, "utf8");
+    const hashedEntry = "pagefind-entry-" + hash + ".json";
+    const before = pfSearch;
+    pfSearch = pfSearch
+      // template literal: pagefind-entry.json?ts=${Date.now()}
+      .replace(/pagefind-entry\.json\?ts=\$\{Date\.now\(\)\}/g, hashedEntry)
+      // template literal with any expression: pagefind-entry.json?ts=${...}
+      .replace(/pagefind-entry\.json\?ts=\$\{[^}]+\}/g, hashedEntry)
+      // concat / plain: pagefind-entry.json?ts=
+      .replace(/pagefind-entry\.json\?ts=/g, hashedEntry)
+      // leftover bare filename (if ?ts= already stripped elsewhere)
+      .replace(/pagefind-entry\.json/g, hashedEntry)
+      // Date.now() used only for that cache-bust (safe after entry URL rewrite)
+      .replace(/Date\.now\(\)/g, '""')
+      .replace(/import\.meta\.url/g, "undefined")
+      .replace(/import\.meta/g, "undefined");
+    if (before === pfSearch) {
+      console.warn("WARNING: no pagefind-entry/import.meta substitutions applied to pagefind_search.js");
+    } else if (!pfSearch.includes(hashedEntry)) {
+      console.warn("WARNING: hashed entry name not found in pagefind_search.js after patch:", hashedEntry);
+    } else {
+      console.log("Patched pagefind_search.js to use", hashedEntry);
+    }
+    fs.writeFileSync(pagefindSearchPath, pfSearch);
 
     //copy to public so the files are included in the PWA cache list if necessary.
     fs.copyFileSync(path.join(__dirname, "static/js/pagefind-entry-" + hash + ".json"), path.join(__dirname, "public/js/pagefind-entry-" + hash + ".json"))
@@ -429,13 +454,17 @@ async function createPagefindIndex() {
       // Edit the pagefind to convert from MJS to CJS
       const pagefindPath = path.join(__dirname, "static/js/pagefind.js");//source pagefind from node module
       let pagefindContent = fs.readFileSync(pagefindPath, "utf8");
-      // Remove 'import.meta.url' from the pagefind file and exports
+      // Pagefind uses import.meta.url (ESM-only). Abridge bundles into a classic
+      // <script defer> (not type=module), so strip import.meta or browsers throw
+      // "Cannot use import.meta outside a module". Fallback basePath still works.
       pagefindContent = pagefindContent
         .replace(
           /initPrimary\(\)\{([^{}]*\{[^{}]*\})*[^{}]*\}/g,
           `initPrimary(){}`
         ) // Remove annoying function
-        .replace(/;export\{[^}]*\}/g, "");
+        .replace(/;export\{[^}]*\}/g, "")
+        .replace(/import\.meta\.url/g, "undefined")
+        .replace(/import\.meta/g, "undefined");
       fs.writeFileSync(pagefindPath, pagefindContent);
 
       // now insert the CJS into the anonymous function within pagefind.search.js
