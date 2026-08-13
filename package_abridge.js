@@ -382,7 +382,7 @@ function minify(fileA, outfile) {
 
 async function searchChange(searchOption) {
   const { replaceInFileSync } = await import('replace-in-file');
-  replaceInFileSync({ files: 'zola.toml', from: /search_library.*=.*/g, to: 'search_library = \"' + searchOption + '\"' });
+  replaceInFileSync({ files: 'zola.toml', from: /^search_library\s*=.*/gm, to: 'search_library = \"' + searchOption + '\"' });
 }
 
 if (args === ' offline') {
